@@ -9,6 +9,9 @@ for g_index, graph in enumerate(self.src_dataset):
                 nodes_features = graph.x
 因为它用的是src_dataset的x
 
+4.此外还实验了把onehot和物理性质拼接起来
+
 #################################################################################################
 
-test mae是0.170eV，比使用onehot要差
+1.只用物理性质test mae是0.170eV，比使用onehot要差
+2.onehot+物理性质test mae是0.151eV，与使用onehot基本相等
