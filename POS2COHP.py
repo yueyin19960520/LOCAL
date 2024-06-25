@@ -102,8 +102,8 @@ class POS2COHP():
                 file.write(training_info + "\n")
                 
             #if learning_rate <= 1e-5 and te_res < best:
-            # if (setting["Binary_COHP"] and te_res > best and learning_rate <=1e-5) or (not setting["Binary_COHP"] and te_res < best and learning_rate <=1e-5):
-            if (setting["Binary_COHP"] and te_res > best and learning_rate <=1e-5) or (not setting["Binary_COHP"] and abs(tr_res - te_res)<0.01 and epoch>=50 and te_res < best):
+            if (setting["Binary_COHP"] and te_res > best and learning_rate <=1e-5) or (not setting["Binary_COHP"] and te_res < best and learning_rate <=1e-5):
+            #if (setting["Binary_COHP"] and te_res > best and learning_rate <=1e-5) or (not setting["Binary_COHP"] and abs(tr_res - te_res)<0.01 and epoch>=50 and te_res < best):
                 torch.save(model, "./models/POS2COHP_Net_%s.pth"%suffix)
                 best = te_res
                 print("Saved Model!") if self.verbose else None
