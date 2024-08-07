@@ -31,6 +31,23 @@ print('torch.cuda.is_available:',torch.cuda.is_available())
 
 clean = True
 list_timestamp = ""
+batch_size = 64
+split_ratio=[0.80, 0.10, 0.10]
+
+icohp_list_keys = restart(clean=clean, criteria="POS2COHP")
+if not clean:
+    with open('saved_lists/list_%s.pkl'%list_timestamp, 'rb') as file:
+        icohp_list_keys = pickle.load(file)
+
+data_num = len(icohp_list_keys)
+tr_list_keys = icohp_list_keys[:int(split_ratio[0]*data_num)]
+vl_list_keys = icohp_list_keys[int(split_ratio[0]*data_num):int(sum(split_ratio[:-1])*data_num)]
+te_list_keys = icohp_list_keys[int(sum(split_ratio[:-1])*data_num):]
+
+splitted_keys = {"train": tr_list_keys,
+                 "valid": vl_list_keys,
+                 "test": te_list_keys}
+
 
 if __name__ == "__main__":
     Metals = ["Sc", "Ti", "V" , "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn", 
@@ -47,71 +64,58 @@ if __name__ == "__main__":
                 'encode': ['both']}
 
     ################### PART_1: Train 1 POS2COHP Models ####################
-    pos2emb = POS2EMB(Element_List, Metals, batch_size=64, setting_dict=settings)
+    pos2emb = POS2EMB(Element_List, Metals, batch_size=batch_size, setting_dict=settings)
 
-    emb_dataset_dict = pos2emb.build_all_datasets()
+    pos2emb.build_all_datasets_prelude()
 
     ################### PART_2: Train 1 POS2COHP Models ####################
-    icohp_list_keys = restart(clean=clean, criteria="POS2COHP")
-    if not clean:
-        with open('saved_lists/list_%s.pkl'%list_timestamp, 'rb') as file:
-            icohp_list_keys = pickle.load(file)
 
-    pos2cohp = POS2COHP(Element_List, setting_dict=settings, icohp_list_keys=icohp_list_keys,
-                        split_ratio=[0.80, 0.10, 0.10], batch_size=64, hidden_feats=[256,256,256,256], 
+    pos2cohp = POS2COHP(Element_List, setting_dict=settings, splitted_keys=splitted_keys,
+                        split_ratio=split_ratio, batch_size=batch_size, hidden_feats=[256,256,256,256], 
                         predictor_hidden_feats=128, epochs=100, verbose=True)
     
     pos2cohp.build_raw_data_dict()
 
-    #pos2cohp.train_all_models()
+    pos2cohp.train_all_models()
 
-    dataset_model_dict = pos2cohp.get_all_models()
+    pos2cohp_dataset_model_dict = pos2cohp.get_all_models()
 
-    dataset_model_dict_with_PRED = pos2cohp.build_bridge_for_E(dataset_model_dict)
+    pos2cohp_dataset_model_dict_with_PRED = pos2cohp.build_bridge_for_E(pos2cohp_dataset_model_dict)
 
-    res = pos2cohp.get_all_models_sorted(dataset_model_dict_with_PRED)
+    pos2cohp_res = pos2cohp.get_all_models_sorted(pos2cohp_dataset_model_dict_with_PRED)
 
-    global_cohp_prediction = pos2emb.apply_global_cohp_prediction(cohp_model_dict=dataset_model_dict)
+    pos2emb.apply_global_cohp_prediction(pos2cohp_model_dict=pos2cohp_dataset_model_dict)
+
+    pos2emb.build_all_datasets_coda()
 
     # #################### PART_3: Train POS2E Models ####################
     restart(clean=clean, criteria="POS2E")
 
-    pos2e = POS2E(COHP_info_dict=dataset_model_dict_with_PRED, splitted_keys=pos2cohp.splitted_keys, 
-                  batch_size=48, dim=256, epochs=200, verbose=True, active_learning=False,
+    pos2e = POS2E(COHP_info_dict=pos2cohp_dataset_model_dict_with_PRED, splitted_keys=splitted_keys, 
+                  batch_size=batch_size, dim=256, epochs=300, verbose=True, active_learning=False,
                   linear_dim_list=[[256,256]], conv_dim_list=[[256,256],[256,256],[256,256]])
 
     pos2e.build_raw_data_dict()
 
     pos2e.train_all_models()
 
-    dataset_model_dict = pos2e.get_all_models()
+    pos2e_dataset_model_dict = pos2e.get_all_models()
 
-    dataset_model_dict_with_PRED = pos2e.build_bridge_for_(dataset_model_dict)
+    pos2e_dataset_model_dict_with_PRED_DICT = pos2e.build_bridge_for_EMB(pos2e_dataset_model_dict)
 
-    res = pos2e.get_all_models_sorted(dataset_model_dict_with_PRED)
+    pos2e_res = pos2e.get_all_models_sorted(pos2e_dataset_model_dict_with_PRED_DICT)
 
-    global_E_prediction = pos2emb.apply_global_E_prediction()
+    pos2emb.apply_global_emb_prediction(pos2e_model_dict=pos2e_dataset_model_dict)
 
-    # #################### PART_3: Active learning in exist dataset TEST ####################
+    # #################### PART_4: Active learning in exist dataset TEST ####################
 
-    """
-    # #################### PART_6: CONT2E without COHP #####################################
+    bad_analogues = pos2emb.get_targets_for_next_loop(pos2e_res)
 
-    # setting_dict = {"Fake_Carbon": None, "Binary_COHP": None, "Hetero_Graph": None, "threshold": -0.6}
-    # cont2ewithoutcohp = CONT2E_without_COHP(Element_List, setting_dict,
-    #                     split_ratio=[0.80, 0.10, 0.10], batch_size=48, conv_dim_list=[[256,256],[256,256],[256,256],[256,256],], dim=256,
-    #                     epochs=300, verbose=True)
-    # # cont2ewithoutcohp.build_raw_data_dict()
-    # cont2ewithoutcohp.train_all_models(icohp_list_keys)
-    # #%%
-    # ################### PART_7: POS2E without COHP #######################################
+    list(map(lambda name:name2structure(name),bad_analogues))
 
-    # setting_dict = {"Fake_Carbon": None, "Binary_COHP": None, "Hetero_Graph": None, "threshold": -0.6}
-    # pos2ewithoutcohp = POS2E_without_COHP(Element_List, setting_dict,
-    #                     split_ratio=[0.80, 0.10, 0.10], batch_size=1, conv_dim_list=[[256,256],[256,256],[256,256],[256,256],], dim=256,
-    #                     epochs=300, verbose=True,edge_dim=1)
-    # # cont2ewithoutcohp.build_raw_data_dict()
-    # pos2ewithoutcohp.train_all_models(icohp_list_keys)
+    # #################### PART_5: STR2E #####################################
+
+
     #%%
     #################### PART_8: Train POS2E_edge Models ####################
 

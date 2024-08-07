@@ -12,15 +12,16 @@ import itertools
 from torch_geometric.loader import DataLoader
 from datetime import datetime
 from Device import device
+from torch.utils.data import Subset
 
 class POS2COHP():
-    def __init__(self, Element_List, setting_dict, icohp_list_keys=None,
+    def __init__(self, Element_List, setting_dict, splitted_keys=None,
                        split_ratio=0.8, batch_size=48, 
                        hidden_feats=[256,256,256,256], predictor_hidden_feats=128, 
                        epochs=300, verbose=True):
 
         self.Element_List = Element_List
-        self.key_list = icohp_list_keys
+        self.splitted_keys = splitted_keys
 
         possibles = list(product(*list(setting_dict.values())))
         all_possible_settings = list(map(lambda p:dict(zip(list(setting_dict.keys()),p)), possibles))
@@ -58,12 +59,17 @@ class POS2COHP():
         suffix = setting2suffix(setting)
         print(suffix)
 
-        pos2cohp_dataset = POS2COHP_Dataset("./", self.Element_List, setting, icohp_list_keys=self.key_list)
+        key_list = [i for j in self.splitted_keys.values() for i in j]
+        pos2cohp_dataset = POS2COHP_Dataset("./", self.Element_List, setting, icohp_list_keys=key_list)
         
-        data_num = len(pos2cohp_dataset)
-        pos2cohp_tr_dataset = pos2cohp_dataset[:int(self.split_ratio[0]*data_num)]
-        pos2cohp_vl_dataset = pos2cohp_dataset[int(self.split_ratio[0]*data_num):int(sum(self.split_ratio[:-1])*data_num)]
-        pos2cohp_te_dataset = pos2cohp_dataset[int(sum(self.split_ratio[:-1])*data_num):]
+        temp1 = lambda data:"_".join((data.slab, data.metal_pair))
+        tr_indices = [i for i,d in enumerate(pos2cohp_dataset) if temp1(d) in self.splitted_keys["train"]]
+        vl_indices = [i for i,d in enumerate(pos2cohp_dataset) if temp1(d) in self.splitted_keys["valid"]]
+        te_indices = [i for i,d in enumerate(pos2cohp_dataset) if temp1(d) in self.splitted_keys["test"]]
+
+        pos2cohp_tr_dataset = Subset(pos2cohp_dataset, tr_indices)
+        pos2cohp_vl_dataset = Subset(pos2cohp_dataset, vl_indices)
+        pos2cohp_te_dataset = Subset(pos2cohp_dataset, te_indices)
 
         pos2cohp_tr_loader = DataLoader(pos2cohp_tr_dataset, batch_size=self.batch_size, shuffle=True, drop_last=True)
         pos2cohp_vl_loader = DataLoader(pos2cohp_vl_dataset, batch_size=self.batch_size, shuffle=False, drop_last=True)
@@ -151,16 +157,19 @@ class POS2COHP():
         for setting in self.combinations_settings:
             suffix = setting2suffix(setting)
 
-            dataset = POS2COHP_Dataset("./", self.Element_List, setting, icohp_list_keys=self.key_list)
+            key_list = [i for j in self.splitted_keys.values() for i in j]
+            dataset = POS2COHP_Dataset("./", self.Element_List, setting, icohp_list_keys=key_list)
             model = torch.load("./models/POS2COHP_Net_%s.pth"%suffix).to("cpu")
             dataset_model_dict[suffix] = [dataset, model, setting]
 
+        """
         len_dataset = len(dataset)
         temp_ratio = [int(len_dataset*self.split_ratio[0]), int(len_dataset*(self.split_ratio[0]+self.split_ratio[1])), len_dataset]
         smp = lambda data:data.slab + "_" + data.metal_pair
         self.splitted_keys = {"train": list(map(smp, dataset[:temp_ratio[0]])),
                               "valid": list(map(smp, dataset[temp_ratio[0]:temp_ratio[1]])),
                               "test": list(map(smp, dataset[temp_ratio[1]:]))}
+        """
         return dataset_model_dict
 
     def build_bridge_for_E(self, dataset_model_dict=None):

@@ -48,7 +48,7 @@ class POS2E():
             file_get.close()
         return None
 
-    def train_single_model(self, setting, dataset, PRED, pool_type="all"):
+    def train_single_model(self, setting, dataset, PRED, pool_type="tsfm"):
         current_time = datetime.now()
         current_time = current_time.strftime("%Y%m%d_%H%M%S")
 
@@ -129,6 +129,89 @@ class POS2E():
                 best = vl_res
                 print("Saved Model!") if self.verbose else None
         return None
+
+
+    def train_all_models(self):
+        for suffix, [dataset, model, setting, PRED] in self.COHP_info_dict.items():
+            if self.active_learning:
+                self.train_single_model_with_active_learning(setting, dataset, PRED,
+                                                             base_lr=1e-3, lr_decay_ratio=0.8, 
+                                                             base_wd=1e-4, wd_decay_ratio=0.8,
+                                                             selection_ratio=0.03, analogue_n=2)
+            else:
+                self.train_single_model(setting, dataset, PRED)
+        print("Finish the training of all POS2E models.")
+
+    def get_all_models(self):
+        dataset_model_dict = {}
+        for suffix, [dataset, model, setting, PRED] in self.COHP_info_dict.items():
+
+            dataset = POS2E_Dataset(root="./", 
+                                    setting=setting, 
+                                    src_dataset=dataset, 
+                                    predicted_value=PRED, 
+                                    raw_data_dict=self.raw_data_dict)
+
+            if self.active_learning:
+                model = torch.load("./models/POS2E_active_Net_%s.pth"%suffix).to("cpu")
+            else:
+                model = torch.load("./models/POS2E_Net_%s.pth"%suffix).to("cpu")
+            dataset_model_dict[suffix] = [dataset, model, setting]
+        return dataset_model_dict
+
+    def build_bridge_for_EMB(self, dataset_model_dict=None):
+        if dataset_model_dict == None:
+            dataset_model_dict = self.get_all_models()
+
+        for suffix, [dataset, model, setting] in dataset_model_dict.items():
+            data_loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=False)
+
+            model.to(device)
+            model.eval()
+            with torch.no_grad():
+                embs, aes, names = zip(*[
+                    (
+                        model(data.to(device), return_embedding=True).to("cpu").detach().numpy(), 
+                        list(np.abs(np.subtract(model(data.to(device)).detach().cpu().numpy(), data.y.to("cpu").numpy()))),
+                        ['%s_%s'%(data.slab[idx],data.metal_pair[idx]) for idx in range(len(data.metal_pair))]
+                    )
+                    for data in data_loader
+                ])
+            embs = np.vstack(embs)
+            aes = list(itertools.chain(*aes))
+            names = list(itertools.chain(*names))
+
+            assert len(embs) == len(aes) == len(names)
+
+            PRED_DICT = {name: (ae, emb) for name, emb, ae in zip(names, embs, aes)}
+
+            dataset_model_dict[suffix].append(PRED_DICT)
+
+        dataset_model_dict_with_PRED_DICT = dataset_model_dict
+        return dataset_model_dict_with_PRED_DICT
+
+    def _measure_model(self, sorted_DIFF, top_k):
+        MAE = np.average([x[1] for x in sorted_DIFF[:round(len(sorted_DIFF)*top_k)]])
+        names_with_MAE = [x[0] for x in sorted_DIFF[:round(len(sorted_DIFF)*top_k)]]
+        return MAE, names_with_MAE
+
+    def get_all_models_sorted(self, dataset_model_dict_with_PRED_DICT=None, top_k=0.1):
+        if dataset_model_dict_with_PRED_DICT == None:
+            dataset_model_dict_with_PRED_DICT = self.build_bridge_for_EMB()
+
+        model_list = []
+        for suffix, [dataset, model, setting, PRED_DICT] in dataset_model_dict_with_PRED_DICT.items():
+            sorted_DIFF = sorted([(k, np.float32(v[0])) for k,v in PRED_DICT.items()], key=lambda x:x[1], reverse=True)
+            top_k_MAE = np.average([x[1] for x in sorted_DIFF[:round(len(sorted_DIFF)*top_k)]])
+            print(suffix, ": %.6f"%top_k_MAE)
+            model_list.append((dataset, model, setting, PRED_DICT, top_k_MAE, suffix))
+
+        return sorted(model_list, key=lambda x:x[4], reverse=True)
+
+
+if __name__ == "__main__":
+    None
+"""
     
     def train_single_model_with_active_learning(self, setting, dataset, PRED, 
                                                 base_lr, lr_decay_ratio, base_wd, wd_decay_ratio,
@@ -280,72 +363,4 @@ class POS2E():
             tr_indices.extend(selected_indices)
             pl_indices = list(set(pl_indices).difference(set(selected_indices)))
         return None
-
-    def train_all_models(self):
-        for suffix, [dataset, model, setting, PRED] in self.COHP_info_dict.items():
-            if self.active_learning:
-                self.train_single_model_with_active_learning(setting, dataset, PRED,
-                                                             base_lr=1e-3, lr_decay_ratio=0.8, 
-                                                             base_wd=1e-4, wd_decay_ratio=0.8,
-                                                             selection_ratio=0.03, analogue_n=2)
-            else:
-                self.train_single_model(setting, suffix, dataset, PRED)
-        print("Finish the training of all POS2E models.")
-
-    def get_all_models(self):
-        dataset_model_dict = {}
-        for suffix, [dataset, model, setting, PRED] in self.COHP_info_dict.items():
-
-            dataset = POS2E_Dataset(root="./", 
-                                    setting=setting, 
-                                    src_dataset=dataset, 
-                                    predicted_value=PRED, 
-                                    raw_data_dict=self.raw_data_dict)
-            
-            if self.active_learning:
-                model = torch.load("./models/POS2E_active_Net_%s.pth"%suffix).to("cpu")
-            else:
-                model = torch.load("./models/POS2E_Net_%s.pth"%suffix).to("cpu")
-            dataset_model_dict[suffix] = [dataset, model, setting]
-        return dataset_model_dict
-
-    def build_bridge_for_(self, dataset_model_dict=None):
-        if dataset_model_dict == None:
-            dataset_model_dict = self.get_all_models()
-
-        for suffix, [dataset, model, setting] in dataset_model_dict.items():
-            data_loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=False)
-
-            model.eval()
-            with torch.no_grad():
-                PRED = list(map(lambda data:(list(np.abs(np.subtract(model(data).numpy(), data.y.numpy()))), data.slab, data.metal_pair), data_loader))
-            DIFF, slabs, metal_pairs = np.hstack(PRED)
-            name_list = [x+"_"+y for x,y in zip(slabs, metal_pairs)]
-            PRED_DICT = dict(zip(name_list, DIFF))
-
-            dataset_model_dict[suffix].append(PRED_DICT)
-
-        dataset_model_dict_with_PRED = dataset_model_dict
-        return dataset_model_dict_with_PRED
-
-    def _measure_model(self, sorted_DIFF, top_k):
-        MAE = np.average([x[1] for x in sorted_DIFF[:round(len(sorted_DIFF)*top_k)]])
-        names_with_MAE = [x[0] for x in sorted_DIFF[:round(len(sorted_DIFF)*top_k)]]
-        return MAE, names_with_MAE
-
-    def get_all_models_sorted(self, dataset_model_dict_with_PRED=None, top_k=0.1):
-        if dataset_model_dict_with_PRED == None:
-            dataset_model_dict_with_PRED = self.build_bridge_for_()
-
-        model_list = []
-        for suffix, [dataset, model, setting, PRED] in dataset_model_dict_with_PRED.items():
-            sorted_DIFF = sorted([(k,np.float32(v)) for k,v in PRED.items()], key=lambda x:x[1], reverse=True)
-            top_k_MAE = np.average([x[1] for x in sorted_DIFF[:round(len(sorted_DIFF)*top_k)]])
-            print(suffix, ": %.6f"%top_k_MAE)
-            model_list.append((dataset, model, setting, PRED, top_k_MAE, suffix))
-
-        return sorted(model_list, key=lambda x:x[4], reverse=True)
-
-
-if __name__ == "__main__":
-    None
+"""
