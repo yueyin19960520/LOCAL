@@ -54,6 +54,7 @@ class POS2COHP_Dataset(Dataset):
         with open(self.raw_paths[0], "rb") as pklf:
             icohp_list_dict = pickle.load(pklf)
 
+        physical_encodings_dict = get_physical_encoding_dict()
         for folder in self.icohp_list_keys:
             cohp_res = icohp_list_dict[folder]
             qv,c_index,ele1,ele2 = folder.split("_")
@@ -75,10 +76,10 @@ class POS2COHP_Dataset(Dataset):
             
             if self.Fake_Carbon:
                 onehot_encoding  = encoder.transform(fake_eles.reshape(-1,1))
-                physical_encoding = get_physical_encodings(fake_eles)
+                physical_encoding = np.array(list(map(lambda e:physical_encodings_dict[e],fake_eles)), dtype="float64")
             else:
                 onehot_encoding = encoder.transform(eles.reshape(-1,1))
-                physical_encoding = get_physical_encodings(eles)
+                physical_encoding = np.array(list(map(lambda e:physical_encodings_dict[e],eles)), dtype="float64")
             
             if self.encode == "onehot":
                 x = torch.tensor(onehot_encoding, dtype=torch.float)
@@ -215,7 +216,10 @@ class POS2E_Dataset(Dataset):
                     temp_MN_index = np.array([x[0] for x in list(filter(lambda x:x[1][0] > x[1][1], list(zip(candi_edge_index, cohp_pred))))])
                 else:
                     temp_MN_index = np.array([x[0] for x in list(filter(lambda x:x[1] <= self.threshold, list(zip(candi_edge_index, cohp_pred))))])
-                
+
+                if not temp_MN_index.size > 0:
+                    continue #Make sure there is at least one MN edge.
+
                 good_MN_index = torch.tensor(temp_MN_index).T
                 edge_index = torch.hstack((ori_edge_index, good_MN_index)).to(torch.int64)
                 data = Data(x=nodes_features, edge_index=edge_index, y=energy)
@@ -253,7 +257,7 @@ class POS2E_Dataset(Dataset):
 
 
 
-class POS2EMB_Dataset(Dataset):
+class POS2EMB_Prel_Dataset(Dataset):
     def __init__(self, 
                  root, 
                  Element_List=None,
@@ -270,7 +274,7 @@ class POS2EMB_Dataset(Dataset):
         self.suffix = setting2suffix(setting)
         super().__init__(root, transform=None, pre_transform=None, pre_filter=None, )
         self.root = root   
-        self.data = torch.load(self.processed_paths[0])  
+        self.data = torch.load(self.processed_paths[0]) 
 
     @property
     def raw_file_names(self):
@@ -278,7 +282,7 @@ class POS2EMB_Dataset(Dataset):
 
     @property
     def processed_file_names(self):
-        return ["POS2EMB_%s.pt"%self.suffix]
+        return ["POS2EMB_Prel_%s.pt"%self.suffix]
     
     def download(self):
         pass
@@ -294,7 +298,11 @@ class POS2EMB_Dataset(Dataset):
         unsym = list(map(lambda x:x[0]+"_"+x[1],list(product(self.Metals, self.Metals))))
         sym = list(map(lambda x:x[0]+"_"+x[1],list(combinations_with_replacement(self.Metals, 2)))) 
 
+        physical_encodings_dict = get_physical_encoding_dict()
+
         sample_space_by_names = {}
+
+        cohp_num_dict = {"QV1":12, "QV2":16, "QV3":12, "QV4":16, "QV5":16, "QV6":16}
 
         for qv in list(filter(lambda x:".vasp" in x, os.listdir("sample_space"))):   # Only consider all N structure  
             ALL_N_structure = Poscar.from_file(os.path.join("sample_space", qv)).structure
@@ -306,11 +314,12 @@ class POS2EMB_Dataset(Dataset):
 
             M_index = list(range(len(ALL_N_structure)))[-2:]
             ALL_N_idx = list(filter(lambda x:x!=None, list(map(lambda x:x if ALL_N_structure[x].specie.name == "N" else None, range(len(ALL_N_structure))))))
+            cohp_num = cohp_num_dict[qv]
+
             for num_C in range(1, len(ALL_N_idx)): # Do not consider all_C and all_N
                 sample_space_by_names[qv][num_C] = []
                 candi_list = list(combinations(ALL_N_idx, num_C))
                 for candi in candi_list:
-                    candi = random.sample(candi_list, 1)[0]
                     number_name = "".join(str(x) for x in [x-min(ALL_N_idx) for x in candi])
                     c_index = number_name
                     ele_pairs = unsym if "QV4" in qv else sym
@@ -320,18 +329,17 @@ class POS2EMB_Dataset(Dataset):
                         
                         C_idx = [int(c) for c in number_name]
                         changed_C_idx = np.array(ALL_N_idx)[C_idx]
-                        eles = np.array([site.specie.name for site in ALL_N_structure][0:-2] + ele_pair.split("_"))
+                        eles = np.array([site.specie.name for site in ALL_N_structure][0:-2] + ele_pair.split("_"), dtype='<U2')
                         fake_eles = copy.deepcopy(eles)
                         
-                        eles[changed_C_idx] = "C"
-                        eles[changed_C_idx] = "Fc"
-                        
                         if self.Fake_Carbon:
+                            fake_eles[changed_C_idx] = "Fc"
                             onehot_encoding  = encoder.transform(fake_eles.reshape(-1,1))
-                            physical_encoding = get_physical_encodings(fake_eles)
+                            physical_encoding = np.array(list(map(lambda e:physical_encodings_dict[e],fake_eles)), dtype="float64")
                         else:
+                            eles[changed_C_idx] = "C"
                             onehot_encoding = encoder.transform(eles.reshape(-1,1))
-                            physical_encoding = get_physical_encodings(eles)   
+                            physical_encoding = np.array(list(map(lambda e:physical_encodings_dict[e],eles)), dtype="float64")  
                             
                         if self.encode == "onehot":
                             x = torch.tensor(onehot_encoding, dtype=torch.float)
@@ -369,16 +377,19 @@ class POS2EMB_Dataset(Dataset):
                             data.MN_edge_index = MN_edge_index
                             data.slab = qv+"_"+c_index
                             data.metal_pair = ele_pair
+                            data.cohp_num = cohp_num
                             data_list.append(data)
                         else:
                             data = Data(x=x, edge_index=edge_index)
                             data.MN_edge_index = MN_edge_index
                             data.slab = qv+"_"+c_index
                             data.metal_pair = ele_pair
-                            data_list.append(data)     
+                            data.cohp_num = cohp_num
+                            data_list.append(data)    
+
  
         self.data = data_list  
-        torch.save(self.data, self.processed_paths[0])
+        torch.save(data_list, self.processed_paths[0])
         print("Number of all dataset is %s."%len(data_list))
       
     def len(self):
@@ -388,27 +399,176 @@ class POS2EMB_Dataset(Dataset):
         return self.data[idx]
 
 
+class STR2E_Dataset(Dataset):
+    def __init__(self, 
+                 root, 
+                 Element_List=None, 
+                 setting=None,
+                 raw_data_dict=None,
+                 str_type=None):
+        
+        self.Element_List = Element_List if not setting["Fake_Carbon"] else Element_List + ["Fc"]
+        self.Fake_Carbon = setting["Fake_Carbon"]
+        self.Binary_COHP = setting["Binary_COHP"]
+        self.Hetero_Graph = setting["Hetero_Graph"]
+        self.threshold = setting["threshold"]
+        self.encode = setting["encode"]
+        self.suffix = setting2suffix(setting)
+        self.raw_data_dict = raw_data_dict
+        self.str_type = str_type
+        super().__init__(root, transform=None, pre_transform=None, pre_filter=None, )
+        self.root = root   
+        self.data = torch.load(self.processed_paths[0])     
+        
+    @property
+    def raw_file_names(self) :
+        return ["icohp_structures_all.pkl"]
 
-class CombinedDataset(Dataset):
-    def __init__(self, datasets):
-        super(CombinedDataset, self).__init__()
-        self.datasets = datasets
-        self.data_list = self._combine_datasets()
+    @property
+    def processed_file_names(self) :
+        return ["STR2E_%s_%s.pt"%(self.str_type, self.suffix)]
+    
+    def download(self):
+        None
 
-    def _combine_datasets(self):
-        combined_data = []
-        for dataset in self.datasets:
-            combined_data.extend(dataset)
-        return combined_data
+    def process(self): 
+        try:
+            encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
+        except:
+            encoder = OneHotEncoder(sparse=False, handle_unknown='ignore')
+        encoder.fit(np.array(self.Element_List).reshape(-1, 1))
+        
+        physical_encodings_dict = get_physical_encoding_dict()
+
+        data_list = []
+
+        for key in self.raw_data_dict:
+            
+            energy = self.raw_data_dict[key]
+            qv, c_index, ele1, ele2 = key.split("_")
+            
+            if self.str_type == "POS":  
+                ori_struct = Poscar.from_file("./sample_space/%s.vasp"%qv).structure
+                
+                N_idx = list(filter(lambda x:x!=None, list(map(lambda x:x if ori_struct[x].specie.name == "N" else None, range(len(ori_struct))))))
+                first_N = min(N_idx)
+                struct = copy.deepcopy(ori_struct)
+                for idx in c_index:
+                    idx = first_N+int(idx)
+                    struct.replace(idx, "C")
+                connectivity = np.array(get_connectivity(struct))
+                
+            else: #self.str_type = CONT
+                struct = Poscar.from_file("../CONTCARs/%s/CONTCAR"%key).structure
+                
+            connectivity = np.array(get_connectivity(struct))
+            idx1, idx2 = len(struct)-2, len(struct)-1
+            temp = list(map(lambda x: x if idx1 in x or idx2 in x else None, connectivity))
+            temp = list(set(sum(map(lambda x:list(x),list(filter(lambda x:x is not None, temp))),[])))
+            Fc_idx = list(filter(lambda x:x is not None,list(map(lambda x: x if struct[x].specie.name == "C" else None, temp))))
+            fake_eles = np.array([struct[s].specie.name if s not in Fc_idx else "Fc" for s in range(len(struct))][0:-2] + re.split("_", key)[-2:])
+            eles = np.array([site.specie.name for site in struct][0:-2] + re.split("_", key)[-2:])
+            
+            if self.Fake_Carbon:
+                onehot_encoding  = encoder.transform(fake_eles.reshape(-1,1))
+                physical_encoding = np.array(list(map(lambda e:physical_encodings_dict[e],fake_eles)), dtype="float64")
+            else:
+                onehot_encoding = encoder.transform(eles.reshape(-1,1))
+                physical_encoding = np.array(list(map(lambda e:physical_encodings_dict[e],eles)), dtype="float64")
+            
+            if self.encode == "onehot":
+                x = torch.tensor(onehot_encoding, dtype=torch.float)
+            elif self.encode == "physical":
+                x = torch.tensor(physical_encoding, dtype=torch.float)
+            elif self.encode == "both":
+                x = torch.tensor(np.hstack((onehot_encoding,physical_encoding)), dtype=torch.float)
+
+            edge_index = torch.tensor(connectivity, dtype=torch.long).t().contiguous()
+
+            data = Data(x=x, edge_index=edge_index, y=energy)
+            data.slab = qv+"_"+c_index
+            data.metal_pair = ele1+"_"+ele2
+            data.y = self.raw_data_dict[key]
+            data_list.append(data)                    
+
+        self.data = data_list
+        torch.save(data_list, self.processed_paths[0])
 
     def len(self):
-        return len(self.data_list)
+        return len(self.data)
 
     def get(self, idx):
-        return self.data_list[idx]
+        return self.data[idx]
 
 
+class POS2EMB_Coda_Dataset(Dataset):
+    def __init__(self, 
+                 root, 
+                 setting=None, 
+                 src_dataset=None, 
+                 predicted_value=None):        
+        
+        self.Fake_Carbon = setting["Fake_Carbon"]
+        self.Binary_COHP = setting["Binary_COHP"]
+        self.Hetero_Graph = setting["Hetero_Graph"]
+        self.threshold = setting["threshold"]
+        self.encode = setting["encode"]
+        self.suffix = setting2suffix(setting)
+        self.src_dataset = src_dataset
+        self.pred = predicted_value
 
+        super(POS2E_Dataset, self).__init__(root, transform=None, pre_transform=None) 
+        self.data = torch.load(self.processed_paths[0])  
+        
+
+    @property
+    def raw_file_names(self):
+        return []
+    
+    @property
+    def processed_file_names(self):
+        return ["POS2EMB_Coda_%s.pt"%self.suffix]
+    
+    def download(self):
+        pass
+    
+    def process(self):
+        data_list = []
+
+        for g_index, graph in enumerate(self.src_dataset):
+            if self.Hetero_Graph:
+                nodes_features = graph.x_dict["atoms"]
+                ori_edge_index = filter_pairs(graph.edge_index_dict['atoms', 'interacts', 'atoms'], {56,57})
+            else:
+                nodes_features = graph.x
+                ori_edge_index = filter_pairs(graph.edge_index, {56,57})
+
+            candi_edge_index = graph.MN_edge_index.T.numpy()
+            cohp_pred = self.pred[g_index]
+
+            if self.Binary_COHP:
+                temp_MN_index = np.array([x[0] for x in list(filter(lambda x:x[1][0] > x[1][1], list(zip(candi_edge_index, cohp_pred))))])
+            else:
+                temp_MN_index = np.array([x[0] for x in list(filter(lambda x:x[1] <= self.threshold, list(zip(candi_edge_index, cohp_pred))))])
+
+            if not temp_MN_index.size > 0:
+                continue #Make sure there is at least one MN edge.
+
+            good_MN_index = torch.tensor(temp_MN_index).T
+            edge_index = torch.hstack((ori_edge_index, good_MN_index)).to(torch.int64)
+            data = Data(x=nodes_features, edge_index=edge_index)
+            data.slab = graph.slab
+            data.metal_pair = graph.metal_pair
+            data_list.append(data)
+
+        self.data = data_list
+        torch.save(data_list, self.processed_paths[0])
+                
+    def len(self):
+        return len(self.data)
+
+    def get(self, idx):
+        return self.data[idx]
 
 
 class POSCOHP2E_Dataset(Dataset):
@@ -462,293 +622,23 @@ class POSCOHP2E_Dataset(Dataset):
 
 
 
+class CombinedDataset(Dataset):
+    def __init__(self, datasets):
+        super(CombinedDataset, self).__init__()
+        self.datasets = datasets
+        self.data_list = self._combine_datasets()
 
-class POS2EwithoutCOHP_Dataset(Dataset):
-    def __init__(self, root, Element_List=None, setting=None, suffix=None, icohp_list_keys=None):
-        self.Element_List = Element_List if not setting["Fake_Carbon"] else Element_List + ["Fc"]
-        self.Fake_Carbon = setting["Fake_Carbon"]
-        self.Binary_COHP = setting["Binary_COHP"]
-        self.Hetero_Graph = setting["Hetero_Graph"]
-        self.threshold = setting["threshold"]
-        self.suffix = suffix
-        self.icohp_list_keys = icohp_list_keys
-        super().__init__(root, transform=None, pre_transform=None, pre_filter=None, )
-        self.root = root   
-        self.data = torch.load(self.processed_paths[0])     
-        
-    @property
-    def raw_file_names(self) :
-        return ["icohp_structures_all.pkl"]
-
-    @property
-    def processed_file_names(self) :
-        return ["POS2EwithoutCOHP.pt"]
-    
-    def download(self):
-        None
-
-    def process(self): 
-        ###                                                                     ###
-        def match_key(input1, input2, dictionary):#根据边张量找edge_attr,也就是COHP值
-            if input1>input2:
-                input1,input2=input2,input1
-            # 将输入的两个数字加1
-            num1 = input1 + 1
-            num2 = input2 + 1
-            
-            # 构建正则表达式模式，假设C和Co可以是任意字母
-            pattern = f"^[A-Za-z]+{num1}_[A-Za-z]+{num2}$"
-            
-            # 遍历字典的键，匹配正则表达式
-            for key in dictionary.keys():
-                if re.match(pattern, key):
-                    return key
-            return None
-        ###                                                                    ###
-        
-        encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
-        encoder.fit(np.array(self.Element_List).reshape(-1, 1))
-
-        data_list = []
-        with open(self.raw_paths[0], "rb") as pklf:
-            icohp_list_dict = pickle.load(pklf)
-        ##########################################################################
-        with open('raw/raw_energy_data_dict_all.pkl','rb') as file:
-            raw_energy_data_dict_all = pickle.load(file)
-            exist_energy_structure = raw_energy_data_dict_all.keys()
-        # for folder, cohp_res in icohp_list_dict.items(): # 遍历icohp_list
-        for folder in self.icohp_list_keys:
-            cohp_res = icohp_list_dict[folder]
-            if not folder in exist_energy_structure:
-                continue
-            qv,c_index,ele1,ele2 = folder.split("_")
-            ori_poscar = Poscar.from_file("./sample_space/%s.vasp"%qv).structure
-            connectivity = np.array(get_connectivity(ori_poscar))
-            idx1, idx2 = len(ori_poscar)-2, len(ori_poscar)-1
-            N_idx = list(filter(lambda x:x!=None, list(map(lambda x:x if ori_poscar[x].specie.name == "N" else None, range(len(ori_poscar))))))
-            first_N = min(N_idx)
-            new_structure = copy.deepcopy(ori_poscar)
-            for idx in c_index:
-                idx = first_N+int(idx)
-                new_structure.replace(idx, "C")
-
-            temp = list(map(lambda x: x if idx1 in x or idx2 in x else None, connectivity))
-            temp = list(set(sum(map(lambda x:list(x),list(filter(lambda x:x is not None, temp))),[])))
-            Fc_idx = list(filter(lambda x:x is not None,list(map(lambda x: x if new_structure[x].specie.name == "C" else None, temp))))
-            fake_eles = np.array([new_structure[s].specie.name if s not in Fc_idx else "Fc" for s in range(len(new_structure))][0:-2] + re.split("_", folder)[-2:])
-            eles = np.array([site.specie.name for site in new_structure][0:-2] + re.split("_", folder)[-2:])
-            
-            if self.Fake_Carbon:
-                onehot  = encoder.transform(fake_eles.reshape(-1,1))
-            else:
-                onehot = encoder.transform(eles.reshape(-1,1))
-            
-            x = torch.tensor(onehot, dtype=torch.float)
-            edge_index = torch.tensor(connectivity, dtype=torch.long).t().contiguous()
-            
-            ###                     加入EDGE_ATTR                    ###
-            bonds = edge_index.T
-            cohp_real = []
-            for bond in bonds:
-                num1,num2 = bond[0], bond[1]
-                bond_key = match_key(num1,num2,cohp_res)
-                if bond_key:
-                    cohp_real.append([cohp_res[bond_key]])
-                else:
-                    cohp_real.append([-5])
-            edge_attr = torch.tensor(cohp_real)
-            ###                                                      ###
-
-            
-            # binary_icohp = torch.from_numpy(np.array(list(map(lambda cohp:[1, 0] if cohp <= self.threshold else [0, 1], MN_icohp)),dtype="float32"))
-
-            # fake_node_index = torch.Tensor(np.arange(MN_edge_index.shape[1])).to(torch.int64).unsqueeze(0)
-            # MN_fake_node_index = torch.vstack((MN_edge_index[0],fake_node_index,MN_edge_index[1]))
-            # fake_x = torch.vstack(list(map(lambda i:x[MN_edge_index[:,i][0].item()] + x[MN_edge_index[:,i][1].item()], np.arange(MN_edge_index.shape[1]))))
-
-            if self.Hetero_Graph:
-                data = HeteroData()
-                data['atoms'].x = x
-                # data['cohps'].x = fake_x
-
-                data['atoms', 'interacts', 'atoms'].edge_index = edge_index
-                # data['cohps', 'interacts', 'cohps'].edge_index = torch.vstack([fake_node_index, fake_node_index])
-                # data['atoms', 'interacts', 'cohps'].edge_index = torch.hstack((torch.vstack((MN_fake_node_index[0,:],MN_fake_node_index[1,:])),
-                #                                                                    torch.vstack((MN_fake_node_index[-1,:],MN_fake_node_index[1,:]))))
-                # if self.Binary_COHP:
-                #     data.MN_icohp = binary_icohp
-                # else:
-                #     data.MN_icohp = torch.Tensor(MN_icohp)
-
-                # data.MN_edge_index = MN_edge_index
-                data.slab = qv+"_"+c_index
-                data.metal_pair = ele1+"_"+ele2
-                data.y = raw_energy_data_dict_all[folder]
-                # data.cohp_num = len(MN_icohp)
-                data_list.append(data)
-            else:
-                data = Data(x=x, edge_index=edge_index,edge_attr=edge_attr)
-                # data.MN_edge_index = MN_edge_index
-
-                # if self.Binary_COHP:
-                #     data.MN_icohp = binary_icohp
-                # else:
-                #     data.MN_icohp = torch.Tensor(MN_icohp)
-
-                data.slab = qv+"_"+c_index
-                data.metal_pair = ele1+"_"+ele2
-                data.y = raw_energy_data_dict_all[folder]
-                # data.cohp_num = len(MN_icohp)
-                data_list.append(data)                    
-
-        self.data = data_list
-        torch.save(data_list, self.processed_paths[0])
+    def _combine_datasets(self):
+        combined_data = []
+        for dataset in self.datasets:
+            combined_data.extend(dataset)
+        return combined_data
 
     def len(self):
-        return len(self.data)
+        return len(self.data_list)
 
     def get(self, idx):
-        return self.data[idx]
-    
-
-
-
-class CONT2EwithoutCOHP_Dataset(Dataset):
-    def __init__(self, root, Element_List=None, setting=None, suffix=None,icohp_list_keys=None):
-        self.Element_List = Element_List if not setting["Fake_Carbon"] else Element_List + ["Fc"]
-        self.Fake_Carbon = setting["Fake_Carbon"]
-        self.Binary_COHP = setting["Binary_COHP"]
-        self.Hetero_Graph = setting["Hetero_Graph"]
-        self.threshold = setting["threshold"]
-        self.suffix = suffix
-        self.icohp_list_keys = icohp_list_keys
-        super().__init__(root, transform=None, pre_transform=None, pre_filter=None, )
-        self.root = root   
-        self.data = torch.load(self.processed_paths[0])     
-        
-    @property
-    def raw_file_names(self) :
-        return ["icohp_structures_all.pkl"]
-        
-
-    @property
-    def processed_file_names(self) :
-        return ["CONT2EwithoutCOHP.pt"]
-    
-    def download(self):
-        None
-
-    def process(self): 
-        encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
-        encoder.fit(np.array(self.Element_List).reshape(-1, 1))
-
-        data_list = []
-        with open(self.raw_paths[0], "rb") as pklf:
-            icohp_list_dict = pickle.load(pklf)
-        ##########################################################################
-        with open('raw/raw_energy_data_dict_all.pkl','rb') as file:
-            raw_energy_data_dict_all = pickle.load(file)
-            exist_energy_structure = raw_energy_data_dict_all.keys()
-        # for folder, _ in icohp_list_dict.items(): # 遍历icohp_list
-        for folder in self.icohp_list_keys:
-            cohp_res = icohp_list_dict[folder]
-            # if not folder.split('_')[0] == 'QV4':
-            #     continue
-            if not folder in exist_energy_structure:
-                continue
-            qv,c_index,ele1,ele2 = folder.split("_")
-            this_contcar = "/root/data/home/hejiangshan/AdsorbEPred/CONTCARs/%s/CONTCAR"%(folder)
-            if not os.path.isfile(this_contcar):
-                print('%s has E but not CONTCAR'%(this_contcar) )
-                continue
-            ori_poscar = Poscar.from_file(this_contcar).structure
-            connectivity = np.array(get_connectivity(ori_poscar))
-            idx1, idx2 = len(ori_poscar)-2, len(ori_poscar)-1
-            N_idx = list(filter(lambda x:x!=None, list(map(lambda x:x if ori_poscar[x].specie.name == "N" else None, range(len(ori_poscar))))))
-            # first_N = min(N_idx)
-            new_structure = copy.deepcopy(ori_poscar)
-            # for idx in c_index:
-            #     idx = first_N+int(idx)
-            #     new_structure.replace(idx, "C")
-
-            temp = list(map(lambda x: x if idx1 in x or idx2 in x else None, connectivity))
-            temp = list(set(sum(map(lambda x:list(x),list(filter(lambda x:x is not None, temp))),[])))
-            Fc_idx = list(filter(lambda x:x is not None,list(map(lambda x: x if new_structure[x].specie.name == "C" else None, temp))))
-            fake_eles = np.array([new_structure[s].specie.name if s not in Fc_idx else "Fc" for s in range(len(new_structure))][0:-2] + re.split("_", folder)[-2:])
-            eles = np.array([site.specie.name for site in new_structure][0:-2] + re.split("_", folder)[-2:])
-            
-            if self.Fake_Carbon:
-                onehot  = encoder.transform(fake_eles.reshape(-1,1))
-            else:
-                onehot = encoder.transform(eles.reshape(-1,1))
-            
-            x = torch.tensor(onehot, dtype=torch.float)
-            edge_index = torch.tensor(connectivity, dtype=torch.long).t().contiguous()
-
-            # MN_edge_index, MN_icohp = get_MCN_edge_index_and_COHP(eles, cohp_res, connectivity)
-            # binary_icohp = torch.from_numpy(np.array(list(map(lambda cohp:[1, 0] if cohp <= self.threshold else [0, 1], MN_icohp)),dtype="float32"))
-
-            # fake_node_index = torch.Tensor(np.arange(MN_edge_index.shape[1])).to(torch.int64).unsqueeze(0)
-            # MN_fake_node_index = torch.vstack((MN_edge_index[0],fake_node_index,MN_edge_index[1]))
-            # fake_x = torch.vstack(list(map(lambda i:x[MN_edge_index[:,i][0].item()] + x[MN_edge_index[:,i][1].item()], np.arange(MN_edge_index.shape[1]))))
-
-            if self.Hetero_Graph:
-                data = HeteroData()
-                data['atoms'].x = x
-                # data['cohps'].x = fake_x
-
-                data['atoms', 'interacts', 'atoms'].edge_index = edge_index
-                # data['cohps', 'interacts', 'cohps'].edge_index = torch.vstack([fake_node_index, fake_node_index])
-                # data['atoms', 'interacts', 'cohps'].edge_index = torch.hstack((torch.vstack((MN_fake_node_index[0,:],MN_fake_node_index[1,:])),
-                #                                                                    torch.vstack((MN_fake_node_index[-1,:],MN_fake_node_index[1,:]))))
-                # if self.Binary_COHP:
-                #     data.MN_icohp = binary_icohp
-                # else:
-                #     data.MN_icohp = torch.Tensor(MN_icohp)
-
-                # data.MN_edge_index = MN_edge_index
-                data.slab = qv+"_"+c_index
-                data.metal_pair = ele1+"_"+ele2
-                data.y = raw_energy_data_dict_all[folder]
-                # data.cohp_num = len(MN_icohp)
-                data_list.append(data)
-            else:
-                data = Data(x=x, edge_index=edge_index)
-                # data.MN_edge_index = MN_edge_index
-
-                # if self.Binary_COHP:
-                #     data.MN_icohp = binary_icohp
-                # else:
-                #     data.MN_icohp = torch.Tensor(MN_icohp)
-
-                data.slab = qv+"_"+c_index
-                data.metal_pair = ele1+"_"+ele2
-                data.y = raw_energy_data_dict_all[folder]
-                # data.cohp_num = len(MN_icohp)
-                data_list.append(data)                    
-
-        self.data = data_list
-        torch.save(data_list, self.processed_paths[0])
-
-    def len(self):
-        return len(self.data)
-
-    def get(self, idx):
-        return self.data[idx]
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
+        return self.data_list[idx]
 
 
 

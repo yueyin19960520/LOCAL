@@ -203,8 +203,8 @@ def filter_pairs(tensor, specific_values):
 
 
 def split_batch_data(batch, batch_pred):
-    #batch = batch.to("cpu")
-    #batch_pred = batch.to("cpu")
+    batch = batch.to("cpu")
+    batch_pred = batch_pred.to("cpu")
     lengths = list(batch.cohp_num.numpy())
     slices = np.cumsum(lengths)[:-1]
     pred_slice = np.split(np.array(batch_pred), slices)
@@ -221,7 +221,7 @@ def extract_COHP(graph, icohp_dicts):
     return torch.Tensor(inter_valid_cohp).to(torch.int64).transpose(0, 1)
 
 
-def name2structure(path, name):
+def name2structure(name,path="./next_loop"):
     qv, C_idx, ele1, ele2 = name.split("_")
     ori = Poscar.from_file(os.path.join("sample_space", "%s.vasp"%qv)).structure
     ALL_N_idx = list(filter(lambda x:x!=None, list(map(lambda x:x if ori[x].specie.name == "N" else None, range(len(ori))))))
@@ -310,9 +310,9 @@ def enumerate_padding_structure(structure, maximum_num_atoms = 300):
 def restart(clean=True, criteria=None):
     if clean:
         processed_path = "processed/"
-        none = list(map(lambda f:print(f"old file has been deleted: {f}") if criteria in f else None,
+        none = list(map(lambda f:print(f"old file has been deleted: {f}") if criteria in f and "POS2EMB" not in f else None,
                         os.listdir(processed_path)))
-        none = list(map(lambda f:os.remove(os.path.join(processed_path, f)) if criteria in f else None,
+        none = list(map(lambda f:os.remove(os.path.join(processed_path, f)) if criteria in f and "POS2EMB" not in f else None,
                         os.listdir(processed_path)))
 
     if criteria == "POS2COHP":
@@ -338,7 +338,7 @@ def restart(clean=True, criteria=None):
         return None
 
 
-def get_physical_encodings(ele_list):
+def get_physical_encoding_dict():
     Metals = ["Sc", "Ti", "V" , "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn", 
            "Y" , "Zr", "Nb", "Mo", "Tc", "Ru", "Rh", "Pd", "Ag", "Cd",
            "Ce", "Hf", "Ta", "W",  "Re", "Os", "Ir", "Pt", "Au",
@@ -381,12 +381,17 @@ def get_physical_encodings(ele_list):
                                             IP_dict[ele]['IP2'],
                                             IP_dict[ele]['IP3'],
                                             IP_dict[ele]['IP4']]
-    physical_encodings_dict["Fc"] = copy.deepcopy(physical_encodings_dict["C"])
-    with open(file_path, "wb") as f:
-        pickle.dump(physical_encodings_dict, f)
+        physical_encodings_dict["Fc"] = copy.deepcopy(physical_encodings_dict["C"])
 
-    physical_encoding = np.array(list(map(lambda e:physical_encodings_dict[e],ele_list)), dtype="float64")
-    return physical_encoding
+        # Normalization 
+        df = pd.DataFrame(physical_encodings_dict)
+        z_score_normalize = lambda row:(row - row.mean())/row.std()
+        physical_encodings_dict = df.apply(z_score_normalize, axis=1).to_dict(orient='list')
+
+        with open(file_path, "wb") as f:
+            pickle.dump(physical_encodings_dict, f)
+
+    return physical_encodings_dict
 
 
 def split_list(input_list, n, split_ratio):
