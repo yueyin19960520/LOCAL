@@ -1,0 +1,11 @@
+#!/bin/bash
+#SBATCH -J HIGHT
+#SBATCH -p long
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH -o ./timestamp/stdout.%j
+#SBATCH -e ./timestamp/stderr.%j
+
+module load VASP/6.3.0
+
+python ./scripts/opt.py
