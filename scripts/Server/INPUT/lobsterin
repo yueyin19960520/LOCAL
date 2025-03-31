@@ -1,0 +1,46 @@
+! (See, here we are using the comment function!)
+!
+! First, enter the energetic window in eV (relative to the Fermi level):
+COHPStartEnergy -10
+COHPEndEnergy 10
+!
+! Then, specify which types of valence orbitals to use:
+!includeOrbitals s p d
+! You can also specify the basis functions per element manually, e.g.:
+! basisFunctions Ga 4s 4p
+! basisFunctions Sr 5s 4s 4p ! Sr_sv potential
+useRecommendedBasisFunctions
+!
+! Now define the pairs for which COHP analysis etc. should be done.
+! The atoms are numbered as per order in the PAW-code control file.
+!cohpBetween atom 1 atom 10
+!
+! If you are interested in single orbital COHPs, you can get all the pairs
+! like s-s, s-p_x, ..., p_z-p_z. Uncomment this line to switch it on:
+
+
+cohpBetween atom 49 atom 57 orbitalWise
+cohpBetween atom 50 atom 57 orbitalWise
+cohpBetween atom 51 atom 57 orbitalWise
+cohpBetween atom 52 atom 57 orbitalWise
+cohpBetween atom 53 atom 57 orbitalWise
+cohpBetween atom 54 atom 57 orbitalWise
+cohpBetween atom 55 atom 57 orbitalWise
+cohpBetween atom 56 atom 57 orbitalWise
+
+
+cohpBetween atom 49 atom 58 orbitalWise
+cohpBetween atom 50 atom 58 orbitalWise
+cohpBetween atom 51 atom 58 orbitalWise
+cohpBetween atom 52 atom 58 orbitalWise
+cohpBetween atom 53 atom 58 orbitalWise
+cohpBetween atom 54 atom 58 orbitalWise
+cohpBetween atom 55 atom 58 orbitalWise
+cohpBetween atom 56 atom 58 orbitalWise
+
+!
+! If you want to generate the COHP pairs automatically, use this to include
+! all pairs in a given distance range (in Angstrom, not in atomic units):
+! cohpGenerator from 1.4 to 1.5
+! cohpGenerator from 1.4 to 1.5 type Ga type Sr
+! and in the latter case only between the specified elements

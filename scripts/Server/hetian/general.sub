@@ -1,0 +1,12 @@
+#!/bin/bash -l
+#SBATCH --job-name=COHP
+#SBATCH --partition=short
+#SBATCH --output=./timestamp/stdout.%j
+#SBATCH --error=./timestamp/stderr.%j
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=4
+
+source /opt/intel/oneapi/setvars.sh
+export PATH=/data/scicons/vasp6.3.0/vasp.6.3.0/bin:$PATH
+
+python ./scripts/cohp.py

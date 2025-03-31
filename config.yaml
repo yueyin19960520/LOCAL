@@ -1,0 +1,74 @@
+Metals: ["Sc", "Ti", "V" , "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn", 
+         "Y" , "Zr", "Nb", "Mo", "Tc", "Ru", "Rh", "Pd", "Ag", "Cd",
+         "Ce", "Hf", "Ta", "W" , "Re", "Os", "Ir", "Pt", "Au", 
+         "Al", "Ga", "Ge", "In", "Sn", "Sb", "Tl", "Pb", "Bi"]
+
+Slabs: ["C", "N"]
+
+global_embedding: False
+
+
+setting_dict:
+  Fake_Carbon: [True]
+  Binary_COHP: [False]
+  Hetero_Graph: [False]
+  threshold: [-0.6]
+  encode: [onehot]
+
+
+POS2EMB:
+  batch_size: 48
+  NEXT_LOOP_NUM: 2500
+
+
+POS2COHP:
+  hidden_feats: [64,128,256,256,128]
+  activation: F.relu
+  predictor_hidden_feats: 64
+  batch_size: 48
+  epochs: 200
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  verbose: True
+
+
+POS2E:
+  edge_involved: True
+  linear_block_dims: []
+  conv_block_dims: [128,256,512,256,128]
+  adj_conv: False
+  conv: GCNLayer
+  conv_edge: GCNLayer_edge
+  pool: GMT
+  pool_ratio: 0.25
+  pool_heads: 4
+  pool_seq: [GMPool_G]
+  pool_layer_norm: False
+  pool_type: tsfm
+  batch_size: 48
+  epochs: 300
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  verbose: True
+  augmentation: False
+  maximum_num_atoms: 100
+
+
+STR2E:
+ linear_block_dims: [256]
+ conv_block_dims: [256,256,256]
+ adj_conv: False
+ conv: GCNLayer
+ pool: GMT
+ pool_ratio: 0.25
+ pool_heads: 4
+ pool_seq: ["GMPool_G"]
+ pool_layer_norm: False
+ pool_type: "tsfm"
+ batch_size: 64
+ epochs: 3
+ learning_rate: 0.001
+ weight_decay: 0.0001
+ verbose: True
+ augmentation: False
+ maximum_num_atoms: 100

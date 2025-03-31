@@ -1,0 +1,65 @@
+servers:
+  electron:
+    hostname: "192.168.215.102"
+    username: "yinyue"
+    password: "ggapbe2020"
+    key_file: ""
+    root: "LOOP2"
+    job_system: "slurm"
+    local_dir_path: "D:/share/LOCAL/NEXT_LOOP/electron/"
+    partitions: ["short", "medium", "long", "new"]
+    core_allocation: [16,16,8]
+    job_allocation:
+      - [0, 4, 2, 6]
+      - [0, 4, 2, 6]
+      - [4, 4, 0, 0]
+
+
+  tansuo:
+    hostname: "192.168.11.1"
+    username: "lijun"
+    key_file: "D:/tsinghua/lijun_new_ssh"
+    root: "WORK//yiny//LOOP2"
+    job_system: "slurm"
+    local_dir_path: "D:/share/LOCAL/NEXT_LOOP/tansuo/"
+    partitions: ["cnall"]
+    core_allocation: [14, 14, 8]
+    job_allocation:
+      - [12,]
+      - [12,]
+      - [12,]
+    module_load: "module load compilers/intel/oneapi-2023/config soft/vasp/vasp.6.3.2"
+
+
+  hetian:
+    hostname: "166.111.28.98"
+    username: "yiny"
+    password: "ggapbe2021"
+    key_file: ""
+    root: "LOOP2"
+    job_system: "slurm"
+    local_dir_path: "D:/share/LOCAL/NEXT_LOOP/hetian/"
+    partitions: ["short", "medium", "long"]
+    core_allocation: [24, 24, 12]
+    job_allocation:
+      - [0, 3, 2]
+      - [0, 3, 2]
+      - [6, 2, 0]
+    module_load: "source /opt/intel/oneapi/setvars.sh && export PATH=/data/scicons/vasp6.3.0/vasp.6.3.0/bin:$PATH"
+
+
+  tushu:
+    hostname: "166.111.121.23"
+    username: "yiny"
+    password: "ggapbe2021"
+    key_file: ""
+    root: "LOOP2"
+    job_system: "pbs"
+    local_dir_path: "D:/share/LOCAL/NEXT_LOOP/tushu/"
+    partitions: ["short", "medium", "long"]
+    core_allocation: [18, 18, 8]
+    job_allocation:
+      - [0, 4, 2]
+      - [0, 4, 2]
+      - [8, 0, 0]
+    module_load: "module load vasp/6.3.0"

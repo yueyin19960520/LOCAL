@@ -1,0 +1,11 @@
+#!/bin/bash
+#SBATCH -J COHP
+#SBATCH -p short
+#SBATCH -N 1
+#SBATCH -n 4
+#SBATCH -o ./timestamp/stdout.%j
+#SBATCH -e ./timestamp/stderr.%j
+
+module load VASP/6.3.0
+
+python ./scripts/cohp.py

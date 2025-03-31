@@ -1,0 +1,11 @@
+#!/bin/bash
+#SBATCH -J COHP
+#SBATCH -p cnall
+#SBATCH -N 1
+#SBATCH --ntasks-per-node=4
+#SBATCH -o ./timestamp/stdout.%j
+#SBATCH -e ./timestamp/stderr.%j
+
+module load compilers/intel/oneapi-2023/config soft/vasp/vasp.6.3.2
+
+python ./scripts/cohp.py
